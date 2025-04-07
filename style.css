@@ -1,0 +1,17 @@
+body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    padding: 20px;
+}
+
+h1 {
+    margin-bottom: 20px;
+}
+
+#csvInput {
+    margin-bottom: 20px;
+}
+
+#preview {
+    margin-top: 20px;
+}

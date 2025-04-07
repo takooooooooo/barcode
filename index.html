@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Barcode Generator</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        label { display: block; margin-top: 10px; }
+        textarea { width: 90%; min-height: 100px; margin-top: 5px; }
+        button { margin-top: 10px; padding: 8px 15px; cursor: pointer; }
+        #zipFilenameInput { margin-left: 5px; padding: 5px; }
+        #status { margin-top: 15px; font-weight: bold; min-height: 1.2em; } /* 少し高さを確保 */
+    </style>
+</head>
+<body>
+
+    <h1>バーコード生成 (CSV or テキスト入力 to AI/PDF Zip)</h1>
+
+    <hr>
+
+    <h2>方法1: テキスト入力</h2>
+    <label for="barcodeInputArea">バーコード番号 (1行に1つ、13桁):</label>
+    <textarea id="barcodeInputArea" placeholder="ここにバーコード番号を改行して貼り付け (例:
+4901234567890
+4909876543210)"></textarea>
+    <button id="generateFromTextButton" onclick="handleTextarea()">テキストから生成</button>
+
+    <hr>
+
+    <h2>方法2: CSVファイル</h2>
+    <label for="csvFile">CSVファイルを選択 (2列目に13桁JANコード):</label>
+    <input type="file" id="csvFile" accept=".csv" onchange="handleFile(event)">
+
+    <hr>
+
+    <h2>共通設定</h2>
+    <label for="zipFilenameInput">ZIPファイル名 (任意):</label>
+    <input type="text" id="zipFilenameInput" placeholder="barcodes.zip">
+
+    <div id="status"></div> <!-- 処理状況表示用 -->
+
+    <!-- ライブラリ読み込み -->
+    <script src="https://unpkg.com/jspdf@latest/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/papa-parse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js"></script>
+    <script src="script.js"></script>
+
+</body>
+</html>
