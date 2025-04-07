@@ -24,99 +24,51 @@ const CODES = {
 const LEFT_PATTERN = ["AAAAAA", "AABABB", "AABBAB", "AABBBA", "ABAABB", "ABBAAB", "ABBBAA", "ABABAB", "ABABBA", "ABBABA"];
 const PT_TO_MM = 25.4 / 72; // 参考
 
-// EAN-13バーコード生成関数 (エラー処理強化)
+// EAN-13バーコード生成関数 (変更なし - 前回のバージョン)
 function generateEan13Barcode(number) {
     function calculateCheckDigit(num) {
         const digits = num.slice(1, 12).split('').map(n => parseInt(n));
-        if (digits.some(isNaN)) {
-            throw new Error(`Invalid non-numeric characters found in digits for checksum: ${num.slice(1, 12)}`);
-        }
-        // 奇数位置(0-indexed)の合計 * 3 + 偶数位置の合計 を計算 (EANの定義に忠実に)
-        let oddSum = 0;
-        let evenSum = 0;
-        for (let i = 0; i < digits.length; i++) {
-             if (i % 2 === 0) { // 1番目、3番目... (0-indexedで偶数)
-                 oddSum += digits[i];
-             } else { // 2番目、4番目... (0-indexedで奇数)
-                 evenSum += digits[i];
-             }
-        }
-        // オリジナルのPythonコードでは順番が逆だった可能性を考慮し、一般的なEAN-13の計算方法に修正
-        // (奇数桁 * 1 + 偶数桁 * 3) または (奇数桁 * 3 + 偶数桁 * 1) のどちらか。通常は後者。
-        // Pythonコードの evensum の計算 `sum + (i % 2 === 0 ? parseInt(n) * 3 : parseInt(n))` は
-        // 0-indexed の i が偶数 (つまり 1, 3, 5... 番目の桁) に 3 を掛けているように見える。要確認。
-        // ここでは一旦、元のPythonコードに近いと思われる計算 (0-indexed偶数に*3) を維持
+        if (digits.some(isNaN)) throw new Error(`Invalid non-numeric characters for checksum: ${num.slice(1, 12)}`);
         const totalSum = digits.reduce((sum, n, i) => sum + (i % 2 === 0 ? n * 3 : n), 0);
-
         const checkDigit = (10 - (totalSum % 10)) % 10;
-        if (isNaN(checkDigit)) {
-             throw new Error(`Checksum calculation resulted in NaN for: ${num}`);
-        }
+        if (isNaN(checkDigit)) throw new Error(`Checksum calculation resulted in NaN for: ${num}`);
         return checkDigit;
     }
-
     function encode(num) {
         if (typeof num !== 'string') throw new Error(`Invalid input type: ${typeof num}`);
         let codeToProcess = num.trim();
-
         if (codeToProcess.length === 12 && /^\d+$/.test(codeToProcess)) {
-            try {
-                codeToProcess += calculateCheckDigit(codeToProcess);
-            } catch (e) {
-                 throw new Error(`Checksum calculation failed for ${codeToProcess}: ${e.message}`);
-            }
+            try { codeToProcess += calculateCheckDigit(codeToProcess); }
+            catch (e) { throw new Error(`Checksum calculation failed for ${codeToProcess}: ${e.message}`); }
         }
-        if (codeToProcess.length !== 13 || !/^\d+$/.test(codeToProcess)) {
-            throw new Error(`Invalid JAN code format: '${codeToProcess}' (original: '${num}')`);
-        }
-
+        if (codeToProcess.length !== 13 || !/^\d+$/.test(codeToProcess)) throw new Error(`Invalid JAN code format: '${codeToProcess}' (original: '${num}')`);
         const firstDigit = parseInt(codeToProcess[0]);
-        if (isNaN(firstDigit) || firstDigit < 0 || firstDigit >= LEFT_PATTERN.length) {
-            throw new Error(`Invalid first digit: ${codeToProcess[0]}`);
-        }
+        if (isNaN(firstDigit) || firstDigit < 0 || firstDigit >= LEFT_PATTERN.length) throw new Error(`Invalid first digit: ${codeToProcess[0]}`);
         const pattern = LEFT_PATTERN[firstDigit];
         let encoded = EDGE;
-
         for (let i = 0; i < 6; i++) {
-            const patternType = pattern[i];
-            const digit = parseInt(codeToProcess[i + 1]);
-            if (isNaN(digit) || !CODES[patternType] || digit < 0 || digit >= CODES[patternType].length) {
-                throw new Error(`Invalid digit/pattern for left part: pattern=${patternType}, digit=${codeToProcess[i+1]}`);
-            }
+            const patternType = pattern[i]; const digit = parseInt(codeToProcess[i + 1]);
+            if (isNaN(digit) || !CODES[patternType] || digit < 0 || digit >= CODES[patternType].length) throw new Error(`Invalid digit/pattern for left part: pattern=${patternType}, digit=${codeToProcess[i+1]}`);
             encoded += CODES[patternType][digit];
         }
         encoded += MIDDLE;
         for (let i = 7; i < 13; i++) {
             const digit = parseInt(codeToProcess[i]);
-             if (isNaN(digit) || !CODES["C"] || digit < 0 || digit >= CODES["C"].length) {
-                 throw new Error(`Invalid digit for right part: ${codeToProcess[i]}`);
-             }
+             if (isNaN(digit) || !CODES["C"] || digit < 0 || digit >= CODES["C"].length) throw new Error(`Invalid digit for right part: ${codeToProcess[i]}`);
             encoded += CODES["C"][digit];
         }
         encoded += EDGE;
-
-        if (typeof encoded !== 'string' || encoded.length !== 95) { // EAN-13は95バーのはず
-             console.error(`[generateEan13Barcode] Internal error: Encoding resulted in invalid string. Length: ${encoded?.length}, Type: ${typeof encoded}`);
-             throw new Error("Internal encoding error occurred.");
-        }
+        if (typeof encoded !== 'string' || encoded.length !== 95) throw new Error("Internal encoding error occurred.");
         return encoded;
     }
-
     try {
         const result = encode(number);
-        if (typeof result !== 'string') { // encodeが文字列を返さなかった場合 (万が一)
-             throw new Error("Encoding function did not return a string.");
-        }
+        if (typeof result !== 'string') throw new Error("Encoding function did not return a string.");
         return result;
-    } catch (e) {
-        // エラーメッセージに元の番号を含め、スタックトレースはそのまま投げる
-        console.error(`Error generating EAN-13 for "${number}": ${e.message}`);
-        throw e; // エラーオブジェクトを再スロー
-    }
+    } catch (e) { console.error(`Error generating EAN-13 for "${number}": ${e.message}`); throw e; }
 }
 
-
-// PDF生成関数 (barcodeのチェック強化)
+// PDF生成関数 (★ 文字送り幅の計算を修正)
 async function generateBarcodePDF(barcodeNumber) {
     console.log(`[generateBarcodePDF] STARTED for: ${barcodeNumber}`);
     try {
@@ -130,47 +82,32 @@ async function generateBarcodePDF(barcodeNumber) {
         // --- バーコード生成と検証 ---
         console.log(`[generateBarcodePDF] Calling generateEan13Barcode for ${barcodeNumber}...`);
         let barcode;
-        try {
-             barcode = generateEan13Barcode(barcodeNumber); // generateEan13Barcode内でエラーが投げられる可能性
-        } catch(barcodeGenError) {
-             // generateEan13Barcodeからのエラーをキャッチし、より具体的な情報と共に再スロー
-             throw new Error(`Failed during barcode string generation for ${barcodeNumber}: ${barcodeGenError.message}`);
-        }
-
-        // generateEan13Barcodeがエラーを投げずに不正な値を返した場合の最終防衛ライン
-        if (typeof barcode !== 'string' || barcode.length === 0) {
-             throw new Error(`Internal error: Failed to get valid barcode string (received type: ${typeof barcode}) for ${barcodeNumber}`);
-        }
+        try { barcode = generateEan13Barcode(barcodeNumber); }
+        catch(barcodeGenError) { throw new Error(`Failed during barcode string generation for ${barcodeNumber}: ${barcodeGenError.message}`); }
+        if (typeof barcode !== 'string' || barcode.length === 0) throw new Error(`Internal error: Failed to get valid barcode string (received type: ${typeof barcode}) for ${barcodeNumber}`);
         console.log(`[generateBarcodePDF] Barcode data validated: ${barcode.length} chars`);
 
         // --- バーコード描画 ---
         let x = 2.9;
-        for (let i = 0; i < barcode.length; i++) {
-            if (barcode[i] === "1") doc.rect(x, 0.264, BAR_WIDTH, BAR_HEIGHT, 'F');
-            x += BAR_WIDTH;
-        }
+        for (let i = 0; i < barcode.length; i++) { if (barcode[i] === "1") doc.rect(x, 0.264, BAR_WIDTH, BAR_HEIGHT, 'F'); x += BAR_WIDTH; }
         console.log('[generateBarcodePDF] Barcode bars drawn.');
 
         // --- ガードバー描画 ---
         x = 2.9;
         const guardBar = "10100000000000000000000000000000000000000000001010000000000000000000000000000000000000000000101";
-        for (let i = 0; i < guardBar.length; i++) {
-            if (guardBar[i] === "1") doc.rect(x, 15.56, BAR_WIDTH, GUARD_BAR_HEIGHT, 'F');
-            x += BAR_WIDTH;
-        }
+        for (let i = 0; i < guardBar.length; i++) { if (guardBar[i] === "1") doc.rect(x, 15.56, BAR_WIDTH, GUARD_BAR_HEIGHT, 'F'); x += BAR_WIDTH; }
         console.log('[generateBarcodePDF] Guard bars drawn.');
 
         // --- フォント読み込み ---
         let font;
-        try {
-            font = await opentype.load('MyriadPro.ttf'); // ★フォントパス確認
-        } catch (fontLoadError) { throw new Error('Font loading failed: ' + fontLoadError.message); }
+        try { font = await opentype.load('MyriadPro.ttf'); } // ★フォントパス確認
+        catch (fontLoadError) { throw new Error('Font loading failed: ' + fontLoadError.message); }
         if (!font) throw new Error('Font loading resulted in null/undefined');
         console.log('[generateBarcodePDF] Font loaded successfully.');
 
         // --- パラメータ設定 ---
         const fontSizePt = 8.75;
-        const letterSpacing = 0.375;
+        const letterSpacing = 0.15;    // 文字間の *追加* スペース
         const baselineYOffset = 0.523;
         const fontSizeScaleFactor = 0.35;
         const finalFontSizeForGetPath = fontSizePt * fontSizeScaleFactor;
@@ -186,7 +123,11 @@ async function generateBarcodePDF(barcodeNumber) {
                 const char = text[i];
                 try {
                     const textPath = font.getPath(char, 0, 0, finalFontSizeForGetPath);
-                    if (!textPath || !textPath.commands || textPath.commands.length === 0) continue;
+                    if (!textPath || !textPath.commands || textPath.commands.length === 0) {
+                         console.warn(`[generateBarcodePDF]   Skipping char '${char}' due to no path data.`);
+                         continue;
+                    }
+
                     const pathData = textPath.commands.map(cmd => {
                         const newCmd = { op: cmd.type.toLowerCase() }; newCmd.c = [];
                         if (cmd.type === 'M' || cmd.type === 'L') { newCmd.c = [cmd.x + currentX, cmd.y + baselineY]; }
@@ -197,13 +138,21 @@ async function generateBarcodePDF(barcodeNumber) {
                         return newCmd;
                     }).filter(Boolean);
                     if (pathData.length > 0) { doc.path(pathData); doc.fill('black'); }
-                    const bbox = textPath.getBoundingBox();
-                    const charWidthMM = bbox ? (bbox.x2 - bbox.x1) : (BAR_WIDTH * 4);
-                    if(!bbox) console.warn(`[generateBarcodePDF] No bounding box for char: '${char}'. Using fallback width.`);
-                    currentX += charWidthMM + letterSpacing;
+
+                    // ★★★ 文字送り幅の計算方法を変更 ★★★
+                    const advanceWidthScaled = font.getAdvanceWidth(char, finalFontSizeForGetPath);
+                    if (typeof advanceWidthScaled !== 'number' || isNaN(advanceWidthScaled)) {
+                         console.warn(`[generateBarcodePDF]   Invalid advance width for char '${char}'. Using fallback width.`);
+                         const bbox = textPath.getBoundingBox();
+                         currentX += (bbox ? (bbox.x2 - bbox.x1) : (BAR_WIDTH * 4)) + letterSpacing; // Fallback
+                    } else {
+                         // フォントの送り幅に追加の文字間隔を加える
+                         currentX += advanceWidthScaled + letterSpacing;
+                    }
+                    // ★★★ ここまで変更 ★★★
+
                 } catch (charError) {
-                     // 文字描画中のエラー
-                     throw new Error(`Error processing character '${char}' for font path: ${charError.message}`);
+                     throw new Error(`Error processing character '${char}': ${charError.message}`);
                 }
             }
         }
@@ -217,8 +166,8 @@ async function generateBarcodePDF(barcodeNumber) {
     } catch (error) {
         // --- 関数全体のエラーハンドリング ---
         console.error(`[generateBarcodePDF] CAUGHT error during processing for ${barcodeNumber}. Message: ${error.message}`);
-        console.error("[generateBarcodePDF] Error Stack:", error.stack); // スタックトレース表示
-        return null; // 失敗時はnullを返す
+        console.error("[generateBarcodePDF] Error Stack:", error.stack);
+        return null;
     }
 }
 
@@ -235,7 +184,6 @@ function disableUI(processing = true) {
     if (csvFileInput) csvFileInput.disabled = processing;
     if (barcodeTextArea) barcodeTextArea.disabled = processing;
     if (generateTextButton) generateTextButton.disabled = processing;
-    // ZIPファイル名入力は処理中でも変更可能のまま
 }
 
 function updateStatus(message) {
@@ -352,7 +300,6 @@ async function generateAndZip(barcodeList) {
                 addedFileCount++;
             } else {
                 failedBarcodes.push(originalBarcode);
-                // result.reason にエラーオブジェクトが入っているはず
                 const reason = result.reason ? result.reason.message : '(No specific reason provided)';
                 console.error(`[generateAndZip] PDF generation failed for '${originalBarcode}'. Status: ${result.status}. Reason: ${reason}`);
             }
@@ -385,6 +332,7 @@ async function generateAndZip(barcodeList) {
             if (failedBarcodes.length > 0) {
                  updateStatus(`エラー: ${failedBarcodes.length}件すべてのバーコード生成に失敗しました。`);
             } else {
+                 // このケースは通常、入力が空だった場合に発生
                  updateStatus('エラー: 有効なバーコードファイルを生成できませんでした。');
             }
         }
@@ -400,4 +348,9 @@ async function generateAndZip(barcodeList) {
 }
 
 // --- 初期化処理などあればここに追加 ---
-// 例: document.addEventListener('DOMContentLoaded', () => { /* 初期化 */ });
+// 例: ページ読み込み時にライブラリチェックを行うなど
+document.addEventListener('DOMContentLoaded', () => {
+     // ライブラリ存在チェックをここで行うことも可能
+     // if (!window.jspdf) console.error("jsPDF not found on page load!");
+     // ...
+});
