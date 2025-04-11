@@ -27,9 +27,11 @@ const PT_TO_MM = 25.4 / 72; // 参考
 // EAN-13バーコード生成関数 (変更なし - 前回のバージョン)
 function generateEan13Barcode(number) {
     function calculateCheckDigit(num) {
-        const digits = num.slice(1, 12).split('').map(n => parseInt(n));
-        if (digits.some(isNaN)) throw new Error(`Invalid non-numeric characters for checksum: ${num.slice(1, 12)}`);
-        const totalSum = digits.reduce((sum, n, i) => sum + (i % 2 === 0 ? n * 3 : n), 0);
+        // チェックデジット計算用に先頭と末尾を除いた11桁を取得 (入力が12桁の場合を想定)
+        const digits = num.slice(0, 12).split('').map(n => parseInt(n)); // 12桁目がチェックデジットとして計算に使われる
+        if (digits.some(isNaN)) throw new Error(`Invalid non-numeric characters for checksum: ${num.slice(0, 12)}`);
+        // EAN-13のチェックデジット計算 (奇数桁 * 1 + 偶数桁 * 3) - ※0ベースインデックスでは逆
+        const totalSum = digits.reduce((sum, n, i) => sum + (i % 2 !== 0 ? n * 3 : n), 0); // 0始まりなので i%2 !== 0 が偶数番目(2,4,6...)
         const checkDigit = (10 - (totalSum % 10)) % 10;
         if (isNaN(checkDigit)) throw new Error(`Checksum calculation resulted in NaN for: ${num}`);
         return checkDigit;
@@ -38,8 +40,11 @@ function generateEan13Barcode(number) {
         if (typeof num !== 'string') throw new Error(`Invalid input type: ${typeof num}`);
         let codeToProcess = num.trim();
         if (codeToProcess.length === 12 && /^\d+$/.test(codeToProcess)) {
-            try { codeToProcess += calculateCheckDigit(codeToProcess); }
-            catch (e) { throw new Error(`Checksum calculation failed for ${codeToProcess}: ${e.message}`); }
+            try {
+                const checkDigit = calculateCheckDigit(codeToProcess); // 12桁からチェックデジット計算
+                codeToProcess += checkDigit; // 計算したチェックデジットを付与
+             }
+            catch (e) { throw new Error(`Checksum calculation failed for ${num}: ${e.message}`); }
         }
         if (codeToProcess.length !== 13 || !/^\d+$/.test(codeToProcess)) throw new Error(`Invalid JAN code format: '${codeToProcess}' (original: '${num}')`);
         const firstDigit = parseInt(codeToProcess[0]);
@@ -52,7 +57,7 @@ function generateEan13Barcode(number) {
             encoded += CODES[patternType][digit];
         }
         encoded += MIDDLE;
-        for (let i = 7; i < 13; i++) {
+        for (let i = 7; i < 13; i++) { // 右側は7桁目から13桁目(インデックス6から12)
             const digit = parseInt(codeToProcess[i]);
              if (isNaN(digit) || !CODES["C"] || digit < 0 || digit >= CODES["C"].length) throw new Error(`Invalid digit for right part: ${codeToProcess[i]}`);
             encoded += CODES["C"][digit];
@@ -68,7 +73,8 @@ function generateEan13Barcode(number) {
     } catch (e) { console.error(`Error generating EAN-13 for "${number}": ${e.message}`); throw e; }
 }
 
-// PDF生成関数 (★ 文字送り幅の計算を修正)
+
+// PDF生成関数 (★ 文字送り幅の計算を修正 & ★ 白背景追加)
 async function generateBarcodePDF(barcodeNumber) {
     console.log(`[generateBarcodePDF] STARTED for: ${barcodeNumber}`);
     try {
@@ -79,22 +85,30 @@ async function generateBarcodePDF(barcodeNumber) {
 
         const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [WIDTH, HEIGHT] });
 
+        // ★★★ 追加: 白い背景を描画 ★★★
+        doc.setFillColor(255, 255, 255); // 塗りつぶし色を白に設定 (RGB: 255, 255, 255)
+        doc.rect(0, 0, WIDTH, HEIGHT, 'F'); // PDFのサイズ全体 (0,0) から (WIDTH, HEIGHT) までを塗りつぶす ('F')
+        console.log('[generateBarcodePDF] White background drawn.');
+        // ★★★ 追加 ここまで ★★★
+
         // --- バーコード生成と検証 ---
         console.log(`[generateBarcodePDF] Calling generateEan13Barcode for ${barcodeNumber}...`);
         let barcode;
         try { barcode = generateEan13Barcode(barcodeNumber); }
         catch(barcodeGenError) { throw new Error(`Failed during barcode string generation for ${barcodeNumber}: ${barcodeGenError.message}`); }
-        if (typeof barcode !== 'string' || barcode.length === 0) throw new Error(`Internal error: Failed to get valid barcode string (received type: ${typeof barcode}) for ${barcodeNumber}`);
+        if (typeof barcode !== 'string' || barcode.length !== 95) throw new Error(`Internal error: Failed to get valid barcode string (received ${typeof barcode}, length ${barcode?.length}) for ${barcodeNumber}`); // barcode.length チェックを95に変更
         console.log(`[generateBarcodePDF] Barcode data validated: ${barcode.length} chars`);
 
         // --- バーコード描画 ---
         let x = 2.9;
+        doc.setFillColor(0, 0, 0); // バーの色を黒に戻す
         for (let i = 0; i < barcode.length; i++) { if (barcode[i] === "1") doc.rect(x, 0.264, BAR_WIDTH, BAR_HEIGHT, 'F'); x += BAR_WIDTH; }
         console.log('[generateBarcodePDF] Barcode bars drawn.');
 
         // --- ガードバー描画 ---
         x = 2.9;
         const guardBar = "10100000000000000000000000000000000000000000001010000000000000000000000000000000000000000000101";
+        doc.setFillColor(0, 0, 0); // ガードバーの色も黒に設定
         for (let i = 0; i < guardBar.length; i++) { if (guardBar[i] === "1") doc.rect(x, 15.56, BAR_WIDTH, GUARD_BAR_HEIGHT, 'F'); x += BAR_WIDTH; }
         console.log('[generateBarcodePDF] Guard bars drawn.');
 
@@ -111,11 +125,17 @@ async function generateBarcodePDF(barcodeNumber) {
         const baselineYOffset = 0.523;
         const fontSizeScaleFactor = 0.35;
         const finalFontSizeForGetPath = fontSizePt * fontSizeScaleFactor;
-        const parts = [ { text: barcodeNumber[0], startX: 0.052 }, { text: barcodeNumber.slice(1, 7), startX: 4.082 }, { text: barcodeNumber.slice(7), startX: 16.34 } ];
+        // barcodeNumber は 13桁のはずなので、インデックスでアクセス
+        const parts = [
+            { text: barcodeNumber[0], startX: 0.052 },
+            { text: barcodeNumber.slice(1, 7), startX: 4.082 }, // 1から6 (index 1 to 6)
+            { text: barcodeNumber.slice(7, 13), startX: 16.34 } // 7から12 (index 7 to 12) - チェックデジット含む
+        ];
         const baselineY = HEIGHT - baselineYOffset;
 
         // --- 文字描画 ---
         console.log('[generateBarcodePDF] Processing text parts...');
+        doc.setFillColor(0, 0, 0); // 文字の色を黒に設定
         for (const part of parts) {
             let currentX = part.startX;
             const text = part.text;
@@ -137,7 +157,7 @@ async function generateBarcodePDF(barcodeNumber) {
                         else { return null; }
                         return newCmd;
                     }).filter(Boolean);
-                    if (pathData.length > 0) { doc.path(pathData); doc.fill('black'); }
+                    if (pathData.length > 0) { doc.path(pathData); doc.fill('black'); } // fill('black') を使用
 
                     // ★★★ 文字送り幅の計算方法を変更 ★★★
                     const advanceWidthScaled = font.getAdvanceWidth(char, finalFontSizeForGetPath);
@@ -167,7 +187,7 @@ async function generateBarcodePDF(barcodeNumber) {
         // --- 関数全体のエラーハンドリング ---
         console.error(`[generateBarcodePDF] CAUGHT error during processing for ${barcodeNumber}. Message: ${error.message}`);
         console.error("[generateBarcodePDF] Error Stack:", error.stack);
-        return null;
+        return null; // エラー発生時は null を返す
     }
 }
 
@@ -184,6 +204,7 @@ function disableUI(processing = true) {
     if (csvFileInput) csvFileInput.disabled = processing;
     if (barcodeTextArea) barcodeTextArea.disabled = processing;
     if (generateTextButton) generateTextButton.disabled = processing;
+    // zipFilenameInput は処理中でも編集可能にするかもしれないので、ここでは無効化しない
 }
 
 function updateStatus(message) {
@@ -202,20 +223,21 @@ async function handleTextarea() {
     }
     const inputText = barcodeTextArea.value;
     if (!inputText.trim()) {
-        updateStatus("テキストエリアにバーコード番号を入力してください。");
+        updateStatus("テキストエリアにバーコード番号（12桁または13桁）を入力してください。");
         disableUI(false); return;
     }
 
     const barcodeList = inputText.split('\n')
         .map(line => line.trim())
-        .filter(line => /^\d{13}$/.test(line));
+        // 12桁または13桁の数字にマッチするかどうかでフィルタリング
+        .filter(line => /^\d{12,13}$/.test(line));
 
     if (barcodeList.length === 0) {
-        updateStatus("有効な13桁のバーコード番号が見つかりませんでした。");
+        updateStatus("有効な12桁または13桁のバーコード番号が見つかりませんでした。");
         disableUI(false); return;
     }
 
-    console.log(`[handleTextarea] Found ${barcodeList.length} valid barcodes.`);
+    console.log(`[handleTextarea] Found ${barcodeList.length} valid barcode inputs.`);
     await generateAndZip(barcodeList);
 }
 
@@ -229,7 +251,7 @@ async function handleFile(event) {
         disableUI(false); return;
     }
     if (typeof window.Papa === 'undefined') {
-         updateStatus("エラー: CSV解析ライブラリが見つかりません。");
+         updateStatus("エラー: CSV解析ライブラリ(PapaParse)が見つかりません。");
          disableUI(false); return;
      }
 
@@ -240,22 +262,32 @@ async function handleFile(event) {
             const data = results.data;
             const barcodeList = [];
             data.forEach((row, index) => {
+                 // CSVの各行からバーコード番号を取得（ここでは2列目を想定）
                  if (Array.isArray(row) && row.length >= 2) {
-                     const barcodeValue = row[1];
+                     const barcodeValue = row[1]; // 2列目 (インデックス 1)
                      if (barcodeValue !== null && typeof barcodeValue !== 'undefined') {
                          const barcodeNumber = String(barcodeValue).trim();
-                         if (/^\d{13}$/.test(barcodeNumber)) barcodeList.push(barcodeNumber);
-                         else console.warn(`[handleFile] Skipping invalid format in CSV row ${index + 1}: '${barcodeNumber}'`);
+                         // 12桁または13桁の数字かチェック
+                         if (/^\d{12,13}$/.test(barcodeNumber)) {
+                             barcodeList.push(barcodeNumber);
+                         } else {
+                              console.warn(`[handleFile] Skipping invalid format in CSV row ${index + 1}, column 2: '${barcodeNumber}'`);
+                         }
+                     } else {
+                          console.warn(`[handleFile] Skipping empty value in CSV row ${index + 1}, column 2.`);
                      }
+                 } else {
+                     console.warn(`[handleFile] Skipping row ${index + 1} due to insufficient columns or invalid format.`);
                  }
             });
 
             if (barcodeList.length === 0) {
-                updateStatus("CSVファイルに有効な13桁のJANコードが見つかりませんでした。");
+                updateStatus("CSVファイルの2列目に有効な12桁または13桁のJANコードが見つかりませんでした。");
                 disableUI(false);
-                if (csvFileInput) csvFileInput.value = ''; return;
+                if (csvFileInput) csvFileInput.value = ''; // ファイル選択をクリア
+                return;
             }
-            console.log(`[handleFile] Found ${barcodeList.length} valid barcodes from CSV.`);
+            console.log(`[handleFile] Found ${barcodeList.length} valid barcode inputs from CSV.`);
             await generateAndZip(barcodeList);
             if (csvFileInput) csvFileInput.value = ''; // 処理完了後クリア
 
@@ -276,17 +308,31 @@ async function generateAndZip(barcodeList) {
     updateStatus(`${barcodeList.length} 件のバーコード生成を開始...`);
 
     // ライブラリチェック
-    if (typeof window.JSZip === 'undefined' || typeof window.saveAs === 'undefined') {
-         updateStatus("エラー: ZIP生成またはファイル保存ライブラリが見つかりません。");
+    if (typeof window.JSZip === 'undefined') {
+         updateStatus("エラー: ZIP生成ライブラリ(JSZip)が見つかりません。");
+         disableUI(false); return;
+     }
+     if (typeof window.saveAs === 'undefined') {
+         updateStatus("エラー: ファイル保存ライブラリ(FileSaver.js)が見つかりません。");
          disableUI(false); return;
      }
 
     try {
-        const pdfPromises = barcodeList.map(barcodeNumber => generateBarcodePDF(barcodeNumber));
-        const zip = new JSZip();
-        const barcodeNumbersProcessed = barcodeList;
+        // 各バーコードに対して generateBarcodePDF を呼び出すプロミスの配列を作成
+        // generateBarcodePDF はエラー時に null を返す可能性がある
+        const pdfPromises = barcodeList.map(barcodeNumber =>
+             generateBarcodePDF(barcodeNumber).catch(err => {
+                 // 個別の generateBarcodePDF 内で catch 済みだが、念のためここでも catch
+                 console.error(`[generateAndZip] Error in promise for ${barcodeNumber}: ${err.message}`);
+                 return null; // エラーが発生した場合は null を返すようにする
+             })
+        );
 
-        updateStatus(`${barcodeList.length} 件のバーコードを処理中...`);
+        const zip = new JSZip();
+        const barcodeNumbersProcessed = [...barcodeList]; // 元のリストをコピー
+
+        updateStatus(`${barcodeList.length} 件のバーコードを処理中... (これには時間がかかる場合があります)`);
+        // すべてのPDF生成プロミスが完了するのを待つ (成功/失敗問わず)
         const pdfResults = await Promise.allSettled(pdfPromises);
         console.log("[generateAndZip] All PDF generation promises settled.");
 
@@ -295,62 +341,98 @@ async function generateAndZip(barcodeList) {
 
         pdfResults.forEach((result, index) => {
             const originalBarcode = barcodeNumbersProcessed[index] || `(unknown at index ${index})`;
-            if (result.status === 'fulfilled' && result.value) {
+            if (result.status === 'fulfilled' && result.value && result.value.filename && result.value.data) {
+                // プロミスが成功し、かつ generateBarcodePDF が有効なオブジェクト ({filename, data}) を返した場合
                 zip.file(result.value.filename, result.value.data);
                 addedFileCount++;
             } else {
+                // プロミスが失敗したか、generateBarcodePDF が null を返した場合
                 failedBarcodes.push(originalBarcode);
-                const reason = result.reason ? result.reason.message : '(No specific reason provided)';
+                const reason = result.status === 'rejected'
+                    ? (result.reason ? result.reason.message : '(No specific reason provided)')
+                    : '(PDF generation function returned null or invalid data)';
                 console.error(`[generateAndZip] PDF generation failed for '${originalBarcode}'. Status: ${result.status}. Reason: ${reason}`);
             }
         });
 
         if (failedBarcodes.length > 0) {
             console.warn(`[generateAndZip] Failed to generate PDF for ${failedBarcodes.length} barcodes: ${failedBarcodes.join(', ')}`);
+            // 必要であればユーザーに警告を表示
             // alert(`警告: ${failedBarcodes.length}件のバーコード生成に失敗しました。\n${failedBarcodes.join(', ')}`);
         }
 
         if (addedFileCount > 0) {
             updateStatus(`ZIPファイルを生成中 (${addedFileCount}件)...`);
-            const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+            const zipBlob = await zip.generateAsync({
+                type: "blob",
+                compression: "DEFLATE",
+                compressionOptions: { level: 6 } // 圧縮レベル (0-9, 9が最高圧縮)
+            });
             console.log("[generateAndZip] ZIP Blob generated.");
 
             let finalZipFilename = "barcodes.zip";
             if (zipFilenameInput && zipFilenameInput.value.trim()) {
                 finalZipFilename = zipFilenameInput.value.trim();
-                if (!finalZipFilename.toLowerCase().endsWith('.zip')) finalZipFilename += ".zip";
+                // 拡張子 .zip がなければ追加
+                if (!finalZipFilename.toLowerCase().endsWith('.zip')) {
+                    finalZipFilename += ".zip";
+                }
             }
             console.log(`[generateAndZip] Determined ZIP filename: ${finalZipFilename}`);
 
-            saveAs(zipBlob, finalZipFilename); // saveAsはグローバルにあると仮定
+            saveAs(zipBlob, finalZipFilename); // FileSaver.js の saveAs 関数でダウンロードをトリガー
+
             let successMessage = `完了: ${finalZipFilename} (${addedFileCount}件) をダウンロードしました。`;
-            if (failedBarcodes.length > 0) successMessage += ` (${failedBarcodes.length}件のエラーあり)`;
+            if (failedBarcodes.length > 0) {
+                successMessage += ` (${failedBarcodes.length}件のエラーあり)`;
+            }
             updateStatus(successMessage);
 
         } else {
-            console.warn("[generateAndZip] No PDF files were successfully generated.");
+            console.warn("[generateAndZip] No PDF files were successfully generated to add to ZIP.");
             if (failedBarcodes.length > 0) {
-                 updateStatus(`エラー: ${failedBarcodes.length}件すべてのバーコード生成に失敗しました。`);
+                 // 入力はあったが、すべて失敗した場合
+                 updateStatus(`エラー: ${failedBarcodes.length}件すべてのバーコード生成に失敗しました。詳細はコンソールを確認してください。`);
             } else {
-                 // このケースは通常、入力が空だった場合に発生
-                 updateStatus('エラー: 有効なバーコードファイルを生成できませんでした。');
+                 // 有効な入力がなかった、または予期せぬ理由でファイルが生成されなかった場合
+                 updateStatus('エラー: ZIPに追加できる有効なバーコードファイルが生成されませんでした。');
             }
         }
 
     } catch (error) {
-        console.error("[generateAndZip] Unexpected error during processing:", error);
+        // generateAndZip 関数自体の予期せぬエラー
+        console.error("[generateAndZip] Unexpected error during the zipping process:", error);
         updateStatus(`致命的なエラーが発生しました: ${error.message}`);
     } finally {
         console.log("[generateAndZip] Processing finished.");
-        disableUI(false); // 最後にUIを有効化
-        // setTimeout(() => { updateStatus(''); }, 7000); // 必要ならメッセージクリア
+        disableUI(false); // 最後に必ずUIを有効化
+        // 必要であれば数秒後にステータスメッセージをクリア
+        // setTimeout(() => { updateStatus(''); }, 7000);
     }
 }
 
-// --- 初期化処理などあればここに追加 ---
-// 例: ページ読み込み時にライブラリチェックを行うなど
+// --- イベントリスナーの設定 ---
+// ページ読み込み完了時にイベントリスナーを設定
 document.addEventListener('DOMContentLoaded', () => {
-     // ライブラリ存在チェックをここで行うことも可能
-     // if (!window.jspdf) console.error("jsPDF not found on page load!");
-     // ...
+    // ライブラリ存在チェック (任意)
+    if (!window.jspdf) console.error("警告: jsPDFが見つかりません。");
+    if (!window.Papa) console.error("警告: PapaParseが見つかりません。");
+    if (!window.opentype) console.error("警告: opentype.jsが見つかりません。");
+    if (!window.JSZip) console.error("警告: JSZipが見つかりません。");
+    if (!window.saveAs) console.error("警告: FileSaver.js (saveAs)が見つかりません。");
+
+    // ボタンやファイル入力へのイベントリスナー設定
+    if (generateTextButton) {
+        generateTextButton.addEventListener('click', handleTextarea);
+    } else {
+        console.error("Error: Button with ID 'generateFromTextButton' not found.");
+    }
+
+    if (csvFileInput) {
+        csvFileInput.addEventListener('change', handleFile);
+    } else {
+        console.error("Error: File input with ID 'csvFile' not found.");
+    }
+
+    updateStatus("準備完了"); // 初期ステータス
 });
